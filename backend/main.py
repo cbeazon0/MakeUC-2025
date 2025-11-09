@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from socketio import AsyncServer    # Asycn Socket.IO server
 from socketio.asgi import ASGIApp  # Wrap server as ASGI app
-import random, asyncio
+import random, asyncio, time
 
 # FastAPI app
 api = FastAPI(
@@ -43,6 +43,23 @@ async def broadcastLobby(lobbyName):
     
     # Broadcast to all in the lobby room
     await sio.emit("lobbyUpdate", payload, room = lobbyName)
+    
+# Broadcast updated leaderboard
+async def broadcastPoints(lobbyName):
+    game = games.get(lobbyName)
+    lobby = lobbies.get(lobbyName)
+    if not game or not lobby:
+        return
+    
+    players = []
+    for p in lobby["players"]:
+        sid = p["sid"]
+        players.append({
+            "name": p["name"],
+            "score": game["points"].get(sid, 0)
+        })
+
+    await sio.emit("updatePoints", {"players": players}, room = lobbyName)
     
 # Handle user connecting
 @sio.event
@@ -184,10 +201,15 @@ async def startGame(sid, data):
     print(f"Initializing game for {lobbyName} -> {games[lobbyName]}")
     await sio.emit("gameInit", {"message": "Setting up game..."}, room = lobbyName)
     
-    # Wait a moment to ensure setup
-    await asyncio.sleep(2)
+    # Standard timing
+    revealDuration = 7
+    drawDuration = 10
+    revealEnd = int(time.time() * 1000) + revealDuration * 1000
+    drawEnd = revealEnd + drawDuration * 1000
     
-    await sio.emit("roundBegin", {"round": 1, "words": games[lobbyName]["words"]}, room = lobbyName)
+    await asyncio.sleep(2)  # Small delay before starting round
+    
+    await sio.emit("roundBegin", {"round": 1, "words": games[lobbyName]["words"], "revealEnd": revealEnd, "drawEnd": drawEnd, "revealDuration": revealDuration, "drawDuration": drawDuration}, room = lobbyName)
     
 # Submit drawing event
 @sio.event
@@ -225,17 +247,52 @@ async def showDrawings(lobbyName):
     if not game or "drawings" not in game:
         return
     
-    print(f"Showing drawings for lobby '{lobbyName}'")
+    print(f"Starting guessing phase for lobby '{lobbyName}'")
     
     # Iterate over each image
     for sid, image in game["drawings"].items():
         playerName = next((p["name"] for p in lobbies[lobbyName]["players"] if p["sid"] == sid), "Unknown")
         
-        await sio.emit("showDrawing", {"drawer": playerName, "image": image}, room = lobbyName)
+        duration = 30 # seconds to show each drawing
+        endTime = int(time.time() * 1000) + duration * 1000
+        
+        await sio.emit("showDrawing", {"drawer": playerName, "image": image, "duration": duration, "endTime": endTime}, room = lobbyName)
         
         print(f"Showing drawing by {playerName}")
-        await asyncio.sleep(30) # Wait 30 seconds before next drawing
+        await asyncio.sleep(duration) # Wait duration seconds before next drawing
     
     # After all drawings shown end round
     await sio.emit("roundSummary", {"message": "All drawings shown!"}, room = lobbyName)
     print(f"Completed showing drawings for lobby '{lobbyName}'")
+    
+# Guess handling event
+@sio.event
+async def submitGuess(sid, data):
+    lobbyName = (data or {}).get("lobbyName", "")
+    guess = (data or {}).get("guess", "").strip().lower()
+    if not lobbyName or not guess:
+        return
+    
+    game = games.get(lobbyName)
+    if not game or "drawings" not in game:
+        return
+    
+    # Find correct word for current drawing
+    correctWord = None
+    for playerSid, word in game["words"].items():
+        if playerSid in game["drawings"]:
+            correctWord = word.lower()
+            break
+    
+    # If guessed correctly and not already guessed
+    if correctWord and guess == correctWord:
+        # Points update
+        game["points"][sid] = game["points"].get(sid, 0) + 10
+        await broadcastPoints(lobbyName)
+        
+        # Notify all players of player correct guess
+        playerName = next((p["name"] for p in lobbies[lobbyName]["players"] if p["sid"] == sid), "A player")
+        await sio.emit("chatNotification", {"message": f"{playerName} guessed correctly!"}, room = lobbyName)
+        
+        # Stop guessing phase for this player
+        await sio.emit("correctGuess", {"text": f"You guessed it! The word was '{correctWord}'"}, to = sid)

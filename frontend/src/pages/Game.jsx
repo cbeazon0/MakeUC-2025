@@ -6,22 +6,30 @@ const Game = ({ me }) => {
 	const [phase, setPhase] = useState("loading");
 	const [word, setWord] = useState(null);
 	const [round, setRound] = useState(0);
-	const [countdown, setCountdown] = useState(5);
-	const [timer, setTimer] = useState(null);
+	const [timer, setTimer] = useState(0);
 	const [leaderboard, setLeaderboard] = useState([]);
+
+	// Syncing stuff
+	const [revealEnd, setRevealEnd] = useState(null);
+	const [drawEnd, setDrawEnd] = useState(null);
+	const [endTime, setEndTime] = useState(null);
 	const [guessTimer, setGuessTimer] = useState(0);
+
 	const [currentImage, setCurrentImage] = useState(null);
 	const [currentDrawer, setCurrentDrawer] = useState(null);
-
 	const handCanvasRef = useRef(null);
+
+	const [chatInput, setChatInput] = useState("");
+	const [chatMessages, setChatMessages] = useState([]);
 
 	useEffect(() => {
 		socket.on("gameInit", () => setPhase("loading"));
 		socket.on("roundBegin", (data) => {
 			setRound(data.round);
 			setWord(data.words[socket.id]);
+			setRevealEnd(data.revealEnd);
+			setDrawEnd(data.drawEnd);
 			setPhase("wordReveal");
-			setCountdown(5);
 		});
 
 		return () => {
@@ -30,62 +38,51 @@ const Game = ({ me }) => {
 		};
 	}, []);
 
-	// 5 second word reveal timer
+	// Word reveal timer
 	useEffect(() => {
-		if (phase !== "wordReveal") return;
+		if (phase !== "wordReveal" || !revealEnd) return;
 
 		const interval = setInterval(() => {
-			setCountdown((prev) => {
-				if (prev <= 1) {
-					clearInterval(interval);
-					setPhase("drawing");
-					setTimer(60);
-					return 0;
-				}
-				return prev - 1;
-			});
-		}, 1000);
+			const timeLeft = Math.max(0, Math.floor((revealEnd - Date.now()) / 1000));
+			setTimer(timeLeft);
+			if (timeLeft <= 0) {
+				clearInterval(interval);
+				setPhase("drawing");
+			}
+		}, 250);
 
 		return () => clearInterval(interval);
-	}, [phase]);
+	}, [phase, revealEnd]);
 
 	// 60 second drawing timer
 	useEffect(() => {
-		if (phase !== "drawing") return;
-
+		if (phase !== "drawing" || !drawEnd) return;
 		const interval = setInterval(() => {
-			setTimer((prev) => {
-				if (prev <= 1) {
-					clearInterval(interval);
-					const imageData = handCanvasRef.current?.getImage();
-					socket.emit("submitDrawing", {
-						lobbyName: me.lobbyName,
-						image: imageData,
-					});
-					setPhase("guessing");
-					return 0;
-				}
-				return prev - 1;
-			});
-		}, 1000);
-
+			const timeLeft = Math.max(0, Math.floor((drawEnd - Date.now()) / 1000));
+			setTimer(timeLeft);
+			if (timeLeft <= 0) {
+				clearInterval(interval);
+				const imageData = handCanvasRef.current?.getImage();
+				socket.emit("submitDrawing", {
+					lobbyName: me.lobbyName,
+					image: imageData,
+				});
+				setPhase("finishedDrawing");
+			}
+		}, 250);
 		return () => clearInterval(interval);
-	}, [phase]);
+	}, [phase, drawEnd]);
 
 	// Guessing phase timer
 	useEffect(() => {
-		if (phase !== "guessing" || guessTimer <= 0) return;
+		if (phase !== "guessing" || !endTime) return;
 		const interval = setInterval(() => {
-			setGuessTimer((t) => {
-				if (t <= 1) {
-					clearInterval(interval);
-					return 0;
-				}
-				return t - 1;
-			});
-		}, 1000);
+			const timeLeft = Math.max(0, Math.floor((endTime - Date.now()) / 1000));
+			setGuessTimer(timeLeft);
+			if (timeLeft <= 0) clearInterval(interval);
+		}, 250);
 		return () => clearInterval(interval);
-	}, [phase]);
+	}, [phase, endTime]);
 
 	useEffect(() => {
 		socket.on("roundEnd", (data) => {
@@ -107,18 +104,42 @@ const Game = ({ me }) => {
 		socket.on("showDrawing", (data) => {
 			setCurrentImage(data.image);
 			setCurrentDrawer(data.drawer);
-			setGuessTimer(data.duration);
+			setEndTime(data.endTime);
 			setPhase("guessing");
 		});
 
-		socket.on("roundSummary", (data) => {
-			setPhase("roundSummary");
-		});
+		socket.on("roundSummary", () => setPhase("roundSummary"));
 
 		return () => {
 			socket.off("showDrawing");
 			socket.off("roundSummary");
 		};
+	}, []);
+
+	useEffect(() => {
+		socket.on("chatMessage", (msg) =>
+			setChatMessages((prev) => [...prev, msg])
+		);
+		socket.on("chatNotification", (msg) =>
+			setChatMessages((prev) => [...prev, { from: "System", text: msg.text }])
+		);
+		socket.on("correctGuess", (msg) =>
+			setChatMessages((prev) => [...prev, { from: "System", text: msg.text }])
+		);
+
+		return () => {
+			socket.off("chatMessage");
+			socket.off("chatNotification");
+			socket.off("correctGuess");
+		};
+	}, []);
+
+	useEffect(() => {
+		socket.on("updatePoints", (data) => {
+			setLeaderboard(data.players || []);
+		});
+
+		return () => socket.off("updatePoints");
 	}, []);
 
 	if (phase === "loading") {
@@ -136,7 +157,7 @@ const Game = ({ me }) => {
 				<p className="text-xl mt-2">
 					Your word: <span className="text-green-400 font-bold">{word}</span>
 				</p>
-				<p className="text-gray-400 mt-3">Starting in {countdown}...</p>
+				<p className="text-gray-400 mt-3">Starting in {timer}...</p>
 			</div>
 		);
 	}
@@ -195,16 +216,54 @@ const Game = ({ me }) => {
 				<p className="text-gray-400 mb-4">Time left: {guessTimer}s</p>
 
 				<div className="bg-gray-800 rounded-lg w-3/4 h-[480px] flex items-center justify-center">
-					<img
-						src={currentImage}
-						alt="Drawing to guess"
-						className="max-h-[460px] rounded shadow-lg"
-					/>
+					{currentImage ? (
+						<img
+							src={currentImage}
+							alt="Drawing to guess"
+							className="max-h-[460px] rounded shadow-lg"
+						/>
+					) : (
+						<p className="text-gray-400">Waiting for drawing...</p>
+					)}
 				</div>
 
-				<p className="mt-6 text-gray-400 italic">
-					(Guessing input will go here later)
-				</p>
+				{/* Chat UI */}
+				<div className="mt-6 w-3/4 bg-gray-800 rounded-lg p-4">
+					<div className="h-48 overflow-y-auto border-b border-gray-700 mb-3">
+						{chatMessages.map((m, i) => (
+							<div key={i} className="text-sm">
+								<span className="font-semibold text-green-400">{m.from}:</span>{" "}
+								<span>{m.text}</span>
+							</div>
+						))}
+					</div>
+					<form
+						onSubmit={(e) => {
+							e.preventDefault();
+							if (chatInput.trim()) {
+								socket.emit("submitGuess", {
+									lobbyName: me.lobbyName,
+									guess: chatInput,
+								});
+								setChatInput("");
+							}
+						}}
+						className="flex space-x-2"
+					>
+						<input
+							className="flex-1 bg-gray-700 rounded px-3 py-1 outline-none"
+							value={chatInput}
+							onChange={(e) => setChatInput(e.target.value)}
+							placeholder="Type your guess..."
+						/>
+						<button
+							type="submit"
+							className="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded"
+						>
+							Send
+						</button>
+					</form>
+				</div>
 			</div>
 		);
 	}
