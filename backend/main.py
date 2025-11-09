@@ -31,6 +31,8 @@ REVEALDURATION = 7
 DRAWDURATION = 15
 GUESSDURATION = 15
 
+POWERUPICON = "⭐"
+
 # Get or create lobby data structure
 def getLobby(lobbyName):
     # If lobby name not taken -> create new lobby
@@ -92,6 +94,14 @@ async def startRound(lobbyName):
     game["drawings"] = {}
     game["drawingOrder"] = []
     
+    # Random powerup
+    if random.random() < 0.8:
+        icon = POWERUPICON
+        x, y = random.randint(10, 90), random.randint(10, 90)
+        game["powerup"] = {"icon": icon, "x": x, "y": y, "claimed": False}
+    else:
+        game["powerup"] = None
+    
     # Build readable leaderboard
     players = []
     for p in lobby["players"]:
@@ -104,7 +114,7 @@ async def startRound(lobbyName):
     players.sort(key=lambda x: x["score"], reverse=True)
     
     # Emit to all players to start the round
-    await sio.emit("roundBegin", {"round": roundNum, "words": words, "revealEnd": revealEnd, "drawEnd": drawEnd, "players": players}, room = lobbyName)
+    await sio.emit("roundBegin", {"round": roundNum, "words": words, "revealEnd": revealEnd, "drawEnd": drawEnd, "players": players, "powerup": game["powerup"]}, room = lobbyName)
     
     waitTime = REVEALDURATION + DRAWDURATION
     for _ in range(waitTime * 10):
@@ -147,8 +157,8 @@ async def endRound(lobbyName):
     # Notify clients to show leaderboard/game summary
     await sio.emit("roundSummary", {"round": currentRound, "players": players}, room = lobbyName)
     
-    # Wait 3 seconds before starting next round
-    await asyncio.sleep(3)
+    # Wait 5 seconds before starting next round
+    await asyncio.sleep(5)
     
     if currentRound < maxRounds:
         game["round"] += 1
@@ -192,6 +202,14 @@ async def showDrawings(lobbyName):
         return
     
     print(f"Starting guessing phase for lobby '{lobbyName}'")
+    
+    hintRecievers = game.get("nextRoundHints", set())
+    for sid in hintRecievers:
+        currentDrawerSid = game.get("currentDrawerSid")
+        correctWord = game["words"].get(currentDrawerSid, "")
+        if correctWord:
+            hintLetter = random.choice(correctWord)
+            await sio.emit("receiveHint", {"letter": hintLetter}, to = sid)
     
     # Iterate over each image
     for drawerSid in game.get("drawingOrder", []):
@@ -380,6 +398,24 @@ async def submitDrawing(sid, data):
         if not game.get("guessingStarted"):
             game["guessingStarted"] = True
             await showDrawings(lobbyName)
+            
+# Powerup event
+@sio.event
+async def collectPowerup(sid, data):
+    lobbyName = (data or {}).get("lobbyName", "").strip().lower()
+    game = games.get(lobbyName)
+    if not game or not game.get("powerup"):
+        return
+    
+    powerup = game["powerup"]
+    if powerup.get("claimed"):
+        return  # already taken
+
+    # Mark as claimed
+    powerup["claimed"] = True
+    powerup["owner"] = sid
+    
+    game.setdefault("nextRoundHints", set()).add(sid)
     
 # Guess handling event
 @sio.event
@@ -403,8 +439,7 @@ async def submitGuess(sid, data):
         await sio.emit("chatMessage", {"from": "System", "text": "You’re the drawer! You can’t guess your own word."}, to = sid)
         return
     
-    # Send player's own guess back to them only
-    await sio.emit("chatMessage", {"from": "You", "text": guess},to = sid)
+    playerName = next((p["name"] for p in lobby["players"] if p["sid"] == sid), "Someone")
     
     # If guess is correct
     if guess == correctWord:
@@ -424,3 +459,8 @@ async def submitGuess(sid, data):
         
         # Notify everyone else
         await sio.emit("chatMessage", {"from": "System", "text": f"{playerName} guessed the word!"}, skip_sid = sid, room = lobbyName)
+        
+        return
+        
+    # If guess incorrect broadcast it to everyone
+    await sio.emit("chatMessage", {"from": playerName, "text": guess}, room = lobbyName)

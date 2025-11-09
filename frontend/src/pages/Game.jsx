@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { socket } from "../socket/socket.js";
 import HandCanvas from "../components/HandCanvas.jsx";
+import Logo from "../assets/logo.png";
 
 const Game = ({ me, onLeave }) => {
 	const [phase, setPhase] = useState("loading");
@@ -10,8 +11,8 @@ const Game = ({ me, onLeave }) => {
 	const [timer, setTimer] = useState(0);
 	const [leaderboard, setLeaderboard] = useState([]);
 	const [wordLength, setWordLength] = useState(0);
+	const [roundPowerup, setRoundPowerup] = useState(null);
 
-	// Syncing stuff
 	const [revealEnd, setRevealEnd] = useState(null);
 	const [drawEnd, setDrawEnd] = useState(null);
 	const [endTime, setEndTime] = useState(null);
@@ -26,6 +27,15 @@ const Game = ({ me, onLeave }) => {
 
 	const navigate = useNavigate();
 
+	const messagesEndRef = useRef(null);
+
+	useEffect(() => {
+		if (messagesEndRef.current) {
+			messagesEndRef.current.scrollTop = messagesEndRef.current.scrollHeight;
+		}
+	}, [chatMessages]);
+
+	// Game initialization and round start
 	useEffect(() => {
 		socket.on("gameInit", (data) => {
 			const players = data.players || me?.lobbyPlayers || [];
@@ -40,6 +50,7 @@ const Game = ({ me, onLeave }) => {
 			setDrawEnd(data.drawEnd);
 			setPhase("wordReveal");
 			setChatMessages([]);
+			setRoundPowerup(data.powerup || null);
 			if (data.players) {
 				setLeaderboard(
 					data.players.map((p) => ({ name: p.name, score: p.score || 0 }))
@@ -115,38 +126,32 @@ const Game = ({ me, onLeave }) => {
 		return () => clearInterval(interval);
 	}, [phase]);
 
+	// Drawing display and chat
 	useEffect(() => {
 		socket.on("showDrawing", (data) => {
 			setCurrentImage(data.image);
-			setCurrentDrawer(data.drawer);
+			setCurrentDrawer(data.drawerSid);
 			setEndTime(data.endTime);
 			setWordLength(data.wordLength || 0);
 			setPhase("guessing");
 		});
 
-		return () => {
-			socket.off("showDrawing");
-		};
-	}, []);
-
-	useEffect(() => {
 		socket.on("chatMessage", (msg) =>
 			setChatMessages((prev) => [...prev, msg])
 		);
 
-		return () => {
-			socket.off("chatMessage");
-		};
-	}, []);
-
-	useEffect(() => {
 		socket.on("updatePoints", (data) => {
 			if (data?.players?.length) setLeaderboard(data.players);
 		});
 
-		return () => socket.off("updatePoints");
+		return () => {
+			socket.off("showDrawing");
+			socket.off("chatMessage");
+			socket.off("updatePoints");
+		};
 	}, []);
 
+	// Round end and game over
 	useEffect(() => {
 		socket.on("roundSummary", (data) => {
 			setLeaderboard(data.players || []);
@@ -164,234 +169,374 @@ const Game = ({ me, onLeave }) => {
 		};
 	}, []);
 
+	// Loading screen
 	if (phase === "loading") {
 		return (
-			<div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
-				<h1 className="text-3xl font-bold animate-pulse">Loading game...</h1>
-			</div>
-		);
-	}
-
-	if (phase === "loadingNext") {
-		return (
-			<div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center">
-				<h1 className="text-2xl font-bold mb-2 animate-pulse">
-					Preparing next stage...
+			<div className="min-h-screen bg-white flex flex-col items-center justify-center gap-6">
+				<img
+					src={Logo}
+					alt="Drawn to Chaos"
+					className="w-64 h-auto animate-pulse"
+				/>
+				<h1 className="text-3xl font-bold text-gray-800 animate-pulse">
+					Loading game...
 				</h1>
-				<p className="text-gray-400">
-					Please wait while everyone finishes drawing.
-				</p>
 			</div>
 		);
 	}
 
+	// Word reveal screen
 	if (phase === "wordReveal") {
 		return (
-			<div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center">
-				<h1 className="text-3xl font-bold">Round {round}</h1>
-				<p className="text-xl mt-2">
-					Your word: <span className="text-green-400 font-bold">{word}</span>
-				</p>
-				<p className="text-gray-400 mt-3">Starting in {timer}...</p>
-			</div>
-		);
-	}
-
-	if (phase === "drawing") {
-		return (
-			<div className="min-h-screen bg-gray-900 text-white flex">
-				<div className="w-1/4 bg-gray-800 p-4 border-r border-gray-700">
-					<h2 className="text-xl font-semibold mb-3">Leaderboard</h2>
-					<ul className="space-y-2">
-						{leaderboard.map((p) => (
-							<li
-								key={p.name}
-								className="flex justify-between bg-gray-700 rounded px-3 py-1"
-							>
-								<span>{p.name}</span>
-								<span>{p.score}</span>
-							</li>
-						))}
-					</ul>
-					<div className="mt-4 text-sm text-gray-400">Time left: {timer}s</div>
-				</div>
-
-				<div className="flex-1 flex flex-col items-center justify-center">
-					<h1 className="text-2xl font-bold mb-3">
-						Round {round}: {word}
+			<div className="min-h-screen bg-purple-50 flex items-center justify-center p-8">
+				<div className="bg-white rounded-2xl shadow-2xl p-12 border-2 border-gray-200 max-w-2xl text-center">
+					<h1 className="text-4xl font-bold text-gray-800 mb-6">
+						Round {round}
 					</h1>
 
-					<div className="bg-gray-700 rounded-lg w-3/4 h-[480px] flex items-center justify-center">
-						<HandCanvas ref={handCanvasRef} />
+					<div className="bg-purple-100 rounded-lg p-8 mb-8">
+						<p className="text-xl text-gray-700 mb-3">Your word is</p>
+						<p className="text-5xl font-bold text-purple-600">{word}</p>
 					</div>
 
-					<p className="text-gray-400 mt-3">
-						Draw your word using your hand gestures!
-					</p>
+					<div className="text-7xl font-bold text-gray-800 mb-4">{timer}</div>
+					<p className="text-gray-600 text-lg">Get ready to draw!</p>
 				</div>
 			</div>
 		);
 	}
 
-	if (phase === "waitingForGuessing") {
+	// Drawing screen
+	if (phase === "drawing") {
 		return (
-			<div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center">
-				<h1 className="text-2xl font-bold">Time’s up!</h1>
-				<p className="text-gray-400 mt-2">Waiting for other players...</p>
-			</div>
-		);
-	}
+			<div className="min-h-screen bg-white flex">
+				{/* Sidebar */}
+				<div className="w-80 bg-purple-50 p-6 border-r-2 border-gray-200">
+					<h2 className="text-2xl font-bold text-gray-800 mb-6">Leaderboard</h2>
 
-	if (phase === "guessing") {
-		return (
-			<div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center">
-				{currentDrawer !== socket.id && (
-					<p className="text-xl mb-3 text-gray-300">
-						Word: {Array(wordLength).fill("_").join(" ")}
-					</p>
-				)}
-				<p className="text-gray-400 mb-4">Time left: {guessTimer}s</p>
-
-				<div className="bg-gray-800 rounded-lg w-3/4 h-[480px] flex items-center justify-center">
-					{currentImage ? (
-						<img
-							src={currentImage}
-							alt="Drawing to guess"
-							className="max-h-[460px] rounded shadow-lg"
-						/>
-					) : (
-						<p className="text-gray-400">Waiting for drawing...</p>
-					)}
-				</div>
-
-				{socket.id === currentDrawer && (
-					<div className="text-sm text-gray-400 mb-2 italic">
-						You are the drawer — waiting for guesses...
-					</div>
-				)}
-
-				{/* Chat UI */}
-				<div className="mt-6 w-3/4 bg-gray-800 rounded-lg p-4">
-					<div className="h-48 overflow-y-auto border-b border-gray-700 mb-3">
-						{chatMessages.map((m, i) => (
-							<div key={i} className="text-sm">
-								<span
-									className={
-										m.from === "System"
-											? "font-semibold text-green-400"
-											: "font-semibold text-blue-400"
-									}
-								>
-									{m.from}:
-								</span>{" "}
-								<span>{m.text}</span>
+					<div className="space-y-3 mb-6">
+						{leaderboard.map((p, idx) => (
+							<div
+								key={p.name}
+								className="bg-white rounded-lg px-4 py-3 shadow-md border border-gray-200 flex justify-between items-center"
+							>
+								<div className="flex items-center gap-3">
+									<span className="text-xl font-bold text-gray-400">
+										#{idx + 1}
+									</span>
+									<span className="font-semibold text-gray-800">{p.name}</span>
+								</div>
+								<span className="text-lg font-bold text-purple-600">
+									{p.score}
+								</span>
 							</div>
 						))}
 					</div>
-					<form
-						onSubmit={(e) => {
-							e.preventDefault();
-							if (chatInput.trim() && socket.id !== currentDrawer) {
-								socket.emit("submitGuess", {
-									lobbyName: me.lobbyName,
-									guess: chatInput,
-								});
-								setChatInput("");
-							}
+
+					<div className="bg-white rounded-lg p-4 shadow-md border-2 border-orange-400 text-center">
+						<p className="text-sm text-gray-600 mb-2">Time Remaining</p>
+						<p className="text-4xl font-bold text-orange-500">{timer}s</p>
+					</div>
+				</div>
+
+				{/* Main area */}
+				<div className="flex-1 flex flex-col items-center justify-center px-8 pt-4">
+					<div className="mb-4 text-center">
+						<h1 className="text-3xl font-bold text-gray-800 mb-4">
+							Round {round}
+						</h1>
+						<div className="bg-yellow-100 rounded-lg px-8 py-4 inline-block border-2 border-yellow-400">
+							<p className="text-3xl font-bold text-yellow-700">{word}</p>
+						</div>
+					</div>
+
+					<HandCanvas
+						ref={handCanvasRef}
+						powerup={roundPowerup}
+						onPowerupCollect={() => {
+							socket.emit("collectPowerup", { lobbyName: me.lobbyName });
+							setRoundPowerup(null);
 						}}
-						className="flex space-x-2"
-					>
-						<input
-							className="flex-1 bg-gray-700 rounded px-3 py-1 outline-none disabled:opacity-50"
-							value={chatInput}
-							onChange={(e) => setChatInput(e.target.value)}
-							placeholder={
-								socket.id === currentDrawer
-									? "You’re the drawer. Waiting for guesses..."
-									: "Type your guess..."
-							}
-							disabled={socket.id === currentDrawer}
-						/>
-						<button
-							type="submit"
-							className="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded disabled:opacity-50"
-							disabled={socket.id === currentDrawer}
-						>
-							Send
-						</button>
-					</form>
+					/>
+
+					<p className="text-gray-600 mt-4 text-lg">
+						✋ Draw your word using hand gestures!
+					</p>
 				</div>
 			</div>
 		);
 	}
 
+	// Waiting screen
+	if (phase === "waitingForGuessing") {
+		return (
+			<div className="min-h-screen bg-gray-50 flex items-center justify-center p-8">
+				<div className="bg-white rounded-2xl shadow-lg p-12 border-2 border-gray-200 max-w-md text-center">
+					<h1 className="text-3xl font-bold text-gray-800 mb-4">Time's up!</h1>
+					<p className="text-gray-600 text-lg mb-6">
+						Waiting for other players...
+					</p>
+
+					<div className="flex justify-center gap-2">
+						<div className="w-3 h-3 bg-purple-500 rounded-full animate-bounce"></div>
+						<div
+							className="w-3 h-3 bg-blue-500 rounded-full animate-bounce"
+							style={{ animationDelay: "0.1s" }}
+						></div>
+						<div
+							className="w-3 h-3 bg-pink-500 rounded-full animate-bounce"
+							style={{ animationDelay: "0.2s" }}
+						></div>
+					</div>
+				</div>
+			</div>
+		);
+	}
+
+	// Guessing screen
+	if (phase === "guessing") {
+		return (
+			<div className="min-h-screen bg-white flex flex-col items-center justify-center px-8 pt-2">
+				<div className="w-full max-w-7xl">
+					{/* Header */}
+					<div className="text-center mb-4">
+						<h1 className="text-4xl font-bold text-gray-800 mb-2">
+							Guess the Drawing!
+						</h1>
+
+						<div className="flex justify-center items-center gap-6">
+							{currentDrawer !== socket.id && (
+								<div className="bg-blue-100 rounded-lg px-8 py-3 border-2 border-blue-400">
+									<p className="text-xl font-bold text-gray-700">
+										Word: {Array(wordLength).fill("_").join(" ")}
+									</p>
+								</div>
+							)}
+
+							<div className="bg-orange-100 rounded-lg px-8 py-3 border-2 border-orange-400">
+								<p className="text-2xl font-bold text-orange-600">
+									{guessTimer}s
+								</p>
+							</div>
+						</div>
+					</div>
+
+					{/* Main content */}
+					<div className="flex gap-6">
+						{/* Drawing */}
+						<div className="flex-1 bg-white rounded-2xl shadow-2xl p-6 border-2 border-gray-200">
+							<div
+								className="bg-gray-50 rounded-lg flex items-center justify-center"
+								style={{ height: "500px" }}
+							>
+								{currentImage ? (
+									<img
+										src={currentImage}
+										alt="Drawing to guess"
+										className="max-h-full max-w-full rounded-lg shadow-lg"
+										style={{ transform: "scaleX(-1)" }}
+									/>
+								) : (
+									<p className="text-gray-400 text-lg">Loading drawing...</p>
+								)}
+							</div>
+						</div>
+						<div className="w-96 bg-white rounded-2xl shadow-2xl p-6 border-2 border-gray-200 flex flex-col">
+							<h2 className="text-2xl font-bold text-gray-800 mb-4">Chat</h2>
+
+							{socket.id === currentDrawer ? (
+								<div className="bg-purple-100 rounded-lg px-4 py-3 mb-4 border-2 border-purple-400 text-center">
+									<p className="text-gray-700 font-semibold">
+										You're the drawer!
+									</p>
+								</div>
+							) : (
+								<div className="bg-blue-100 rounded-lg px-4 py-3 mb-4 border-2 border-blue-400 text-center">
+									<p className="text-gray-700 font-semibold">
+										You're the guesser!
+									</p>
+								</div>
+							)}
+							<div
+								className="h-80 overflow-y-auto border-2 border-gray-200 rounded-lg p-4 bg-gray-50 mb-4"
+								ref={messagesEndRef}
+							>
+								{chatMessages.map((m, i) => (
+									<div key={i} className="mb-3">
+										<span
+											className={
+												m.from === "System"
+													? "font-bold text-green-600"
+													: m.from === "You"
+													? "font-bold text-blue-600"
+													: "font-bold text-purple-600"
+											}
+										>
+											{m.from}:
+										</span>{" "}
+										<span className="text-gray-700">{m.text}</span>
+									</div>
+								))}
+							</div>
+
+							{/* Input */}
+							<form
+								onSubmit={(e) => {
+									e.preventDefault();
+									if (chatInput.trim() && socket.id !== currentDrawer) {
+										socket.emit("submitGuess", {
+											lobbyName: me.lobbyName,
+											guess: chatInput,
+										});
+										setChatInput("");
+									}
+								}}
+								className="flex gap-3"
+							>
+								<input
+									className="flex-1 bg-white border-2 border-gray-300 rounded-lg px-4 py-3 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:opacity-50 disabled:bg-gray-100"
+									value={chatInput}
+									onChange={(e) => setChatInput(e.target.value)}
+									placeholder={
+										socket.id === currentDrawer
+											? "Waiting for guesses..."
+											: "Type your guess..."
+									}
+									disabled={socket.id === currentDrawer}
+								/>
+								<button
+									type="submit"
+									className="bg-purple-500 hover:bg-purple-600 text-white px-6 py-3 rounded-lg font-bold transform hover:scale-105 transition duration-200 disabled:opacity-50 disabled:transform-none"
+									disabled={socket.id === currentDrawer}
+								>
+									Send
+								</button>
+							</form>
+						</div>
+					</div>
+				</div>
+			</div>
+		);
+	}
+
+	// Round summary
 	if (phase === "roundSummary") {
 		return (
-			<div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center">
-				<h1 className="text-3xl font-bold mb-2">Round {round} Summary</h1>
-				<h2 className="text-gray-400 mb-4">
-					Next round starting in {timer}s...
-				</h2>
-				<div className="bg-gray-800 rounded p-4 w-64">
-					<h3 className="font-semibold mb-2">Leaderboard</h3>
-					<ul className="space-y-2">
-						{leaderboard.map((p) => (
-							<li
+			<div className="min-h-screen bg-orange-50 flex items-center justify-center p-8">
+				<div className="bg-white rounded-2xl shadow-2xl p-12 border-2 border-gray-200 max-w-lg w-full">
+					<h1 className="text-4xl font-bold text-gray-800 mb-4 text-center">
+						Round {round} Complete!
+					</h1>
+
+					<div className="bg-orange-100 rounded-lg px-6 py-4 mb-8 text-center border-2 border-orange-400">
+						<p className="text-gray-700 font-semibold text-lg">
+							Next round in{" "}
+							<span className="text-3xl font-bold text-orange-600">
+								{timer}s
+							</span>
+						</p>
+					</div>
+
+					<h3 className="text-xl font-bold text-gray-700 mb-4 text-center">
+						Current Standings
+					</h3>
+
+					<div className="space-y-3">
+						{leaderboard.map((p, idx) => (
+							<div
 								key={p.name}
-								className="flex justify-between bg-gray-700 rounded px-3 py-1"
+								className={`rounded-lg px-6 py-4 shadow-md border-2 flex justify-between items-center ${
+									idx === 0
+										? "bg-yellow-100 border-yellow-400"
+										: "bg-white border-gray-200"
+								}`}
 							>
-								<span>{p.name}</span>
-								<span>{p.score}</span>
-							</li>
+								<div className="flex items-center gap-3">
+									<span className="text-2xl font-bold text-gray-400">
+										#{idx + 1}
+									</span>
+									<span className="font-bold text-gray-800">{p.name}</span>
+								</div>
+								<span className="text-xl font-bold text-purple-600">
+									{p.score} pts
+								</span>
+							</div>
 						))}
-					</ul>
+					</div>
 				</div>
 			</div>
 		);
 	}
 
+	// Game over
 	if (phase === "gameOver") {
 		return (
-			<div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center">
-				<h1 className="text-3xl font-bold mb-2">Game Over!</h1>
-				<h2 className="text-gray-400 mb-4">Final Leaderboard</h2>
+			<div className="min-h-screen bg-purple-50 flex items-center justify-center p-8">
+				<div className="bg-white rounded-2xl shadow-2xl p-12 border-2 border-gray-200 max-w-2xl w-full">
+					<div className="text-center mb-10">
+						<div className="text-7xl mb-6">🏆</div>
+						<h1 className="text-5xl font-bold text-gray-800 mb-3">
+							Game Over!
+						</h1>
+						<p className="text-xl text-gray-600">Final Results</p>
+					</div>
 
-				<div className="bg-gray-800 rounded p-4 w-64 mb-6">
-					<ul className="space-y-2">
-						{leaderboard.map((p) => (
-							<li
+					<div className="space-y-4 mb-10">
+						{leaderboard.map((p, idx) => (
+							<div
 								key={p.name}
-								className="flex justify-between bg-gray-700 rounded px-3 py-1"
+								className={`rounded-lg px-6 py-5 shadow-lg border-2 flex justify-between items-center transform transition hover:scale-105 ${
+									idx === 0
+										? "bg-yellow-200 border-yellow-400"
+										: idx === 1
+										? "bg-gray-200 border-gray-400"
+										: idx === 2
+										? "bg-orange-200 border-orange-400"
+										: "bg-white border-gray-200"
+								}`}
 							>
-								<span>{p.name}</span>
-								<span>{p.score}</span>
-							</li>
+								<div className="flex items-center gap-4">
+									<span className="text-4xl">
+										{idx === 0
+											? "🥇"
+											: idx === 1
+											? "🥈"
+											: idx === 2
+											? "🥉"
+											: `#${idx + 1}`}
+									</span>
+									<span className="text-xl font-bold text-gray-800">
+										{p.name}
+									</span>
+								</div>
+								<span className="text-2xl font-bold text-purple-600">
+									{p.score} pts
+								</span>
+							</div>
 						))}
-					</ul>
-				</div>
+					</div>
 
-				<div className="flex space-x-4">
-					{/* Back to Lobby */}
-					<button
-						onClick={() => {
-							socket.emit("getLobbyState", { lobbyName: me.lobbyName });
-							navigate("/lobby");
-						}}
-						className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded"
-					>
-						Back to Lobby
-					</button>
+					<div className="flex gap-4">
+						<button
+							onClick={() => {
+								socket.emit("getLobbyState", { lobbyName: me.lobbyName });
+								navigate("/lobby");
+							}}
+							className="flex-1 bg-blue-500 hover:bg-blue-600 text-white px-6 py-4 rounded-lg font-bold transform hover:scale-105 transition duration-200 shadow-lg"
+						>
+							Back to Lobby
+						</button>
 
-					{/* Leave Lobby */}
-					<button
-						onClick={() => {
-							socket.emit("leaveLobby", { lobbyName: me.lobbyName });
-							onLeave();
-						}}
-						className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded"
-					>
-						Leave Lobby
-					</button>
+						<button
+							onClick={() => {
+								socket.emit("leaveLobby", { lobbyName: me.lobbyName });
+								onLeave();
+							}}
+							className="flex-1 bg-red-500 hover:bg-red-600 text-white px-6 py-4 rounded-lg font-bold transform hover:scale-105 transition duration-200 shadow-lg"
+						>
+							Leave Lobby
+						</button>
+					</div>
 				</div>
 			</div>
 		);

@@ -17,7 +17,7 @@ function lerp(a, b, t) {
 	return a + (b - a) * t;
 }
 
-const HandCanvas = forwardRef((props, ref) => {
+const HandCanvas = forwardRef(({ powerup, onPowerupCollect }, ref) => {
 	// Webcam ref
 	const webcamRef = useRef(null);
 
@@ -26,11 +26,13 @@ const HandCanvas = forwardRef((props, ref) => {
 	const drawRef = useRef(null);
 	const overlayRef = useRef(null);
 
-	// Toggle background button area
+	// Toggle background button area & clear button area
 	const toggleArea = useRef({ x: 20, y: 400, w: 100, h: 60 });
+	const clearArea = useRef({ x: 120, y: 400, w: 100, h: 60 });
 
 	// Mediapipe hand landmarker
 	const [handLandmarker, setHandLandmarker] = useState(null);
+	const [isLoading, setIsLoading] = useState(true);
 
 	// Show bg and drawing color state
 	const [showBg, setShowBg] = useState(false);
@@ -54,18 +56,25 @@ const HandCanvas = forwardRef((props, ref) => {
 	// Mediapipe initialization
 	useEffect(() => {
 		const setup = async () => {
-			const vision = await FilesetResolver.forVisionTasks(
-				"https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
-			);
-			const landmarker = await HandLandmarker.createFromOptions(vision, {
-				baseOptions: {
-					modelAssetPath:
-						"https://storage.googleapis.com/mediapipe-assets/hand_landmarker.task",
-				},
-				numHands: 1,
-				runningMode: "VIDEO",
-			});
-			setHandLandmarker(landmarker);
+			try {
+				setIsLoading(true);
+				const vision = await FilesetResolver.forVisionTasks(
+					"https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+				);
+				const landmarker = await HandLandmarker.createFromOptions(vision, {
+					baseOptions: {
+						modelAssetPath:
+							"https://storage.googleapis.com/mediapipe-assets/hand_landmarker.task",
+					},
+					numHands: 1,
+					runningMode: "VIDEO",
+				});
+				setHandLandmarker(landmarker);
+				setIsLoading(false);
+			} catch (error) {
+				console.error("Failed to load hand tracking:", error);
+				setIsLoading(false);
+			}
 		};
 		setup();
 	}, []);
@@ -134,6 +143,21 @@ const HandCanvas = forwardRef((props, ref) => {
 					overlayCtx.font = "16px sans-serif";
 					overlayCtx.fillStyle = "white";
 					overlayCtx.fillText("Toggle BG", x + 10, y + 35);
+					overlayCtx.restore();
+
+					// Draw clear canvas button
+					const { x: cx, y: cy, w: cw, h: ch } = clearArea.current;
+					overlayCtx.save();
+					overlayCtx.scale(-1, 1);
+					overlayCtx.translate(-640, 0);
+					overlayCtx.fillStyle = "rgba(0,0,0,0.25)";
+					overlayCtx.fillRect(cx, cy, cw, ch);
+					overlayCtx.strokeStyle = "white";
+					overlayCtx.lineWidth = 2;
+					overlayCtx.strokeRect(cx, cy, cw, ch);
+					overlayCtx.font = "16px sans-serif";
+					overlayCtx.fillStyle = "white";
+					overlayCtx.fillText("Clear", cx + 30, cy + 35);
 					overlayCtx.restore();
 
 					// Draw hand skeleton
@@ -214,6 +238,16 @@ const HandCanvas = forwardRef((props, ref) => {
 							hovered = { type: "toggle" };
 						}
 
+						// Detect clear button hover
+						if (
+							mirroredX >= clearArea.current.x &&
+							mirroredX <= clearArea.current.x + clearArea.current.w &&
+							yPos >= clearArea.current.y &&
+							yPos <= clearArea.current.y + clearArea.current.h
+						) {
+							hovered = { type: "clear" };
+						}
+
 						// Hold to activate button with progress circle
 						if (hovered) {
 							if (
@@ -243,13 +277,14 @@ const HandCanvas = forwardRef((props, ref) => {
 
 								// Activate button action when progress completes (1 sec)
 								if (progress >= 1) {
-									// Change draw color else toggle bg
 									if (hovered.type === "drawColor") {
 										drawCtx.beginPath();
 										prevPos.current = { x: null, y: null };
 										setDrawColor(hovered.color);
 									} else if (hovered.type === "toggle") {
 										setShowBg((p) => !p);
+									} else if (hovered.type === "clear") {
+										clearDrawing();
 									}
 									hoverState.current = { button: null, start: null };
 								}
@@ -288,50 +323,62 @@ const HandCanvas = forwardRef((props, ref) => {
 
 	return (
 		<div className="relative flex flex-col items-center">
-			{/* Webcam component */}
-			<Webcam
-				ref={webcamRef}
-				mirrored
-				className="rounded-lg shadow-md"
-				style={{ width: 640, height: 480 }}
-				videoConstraints={{ width: 480, height: 360, facingMode: "user" }}
-			/>
+			{/* Webcam component with enhanced border */}
+			<div className="relative rounded-2xl overflow-hidden shadow-2xl border-4 border-purple-300">
+				<Webcam
+					ref={webcamRef}
+					mirrored
+					className="rounded-xl"
+					style={{ width: 640, height: 480 }}
+					videoConstraints={{ width: 480, height: 360, facingMode: "user" }}
+				/>
 
-			{/* Canvas for bg */}
-			<canvas
-				ref={bgRef}
-				width={640}
-				height={480}
-				className="absolute top-0 left-0 rounded-lg"
-				style={{ transform: "scaleX(-1)" }}
-			/>
+				{/* Loading overlay */}
+				{isLoading && (
+					<div className="absolute inset-0 bg-white bg-opacity-90 flex flex-col items-center justify-center rounded-xl">
+						<div className="flex gap-2 mb-4">
+							<div className="w-4 h-4 bg-purple-500 rounded-full animate-bounce"></div>
+							<div
+								className="w-4 h-4 bg-blue-500 rounded-full animate-bounce"
+								style={{ animationDelay: "0.1s" }}
+							></div>
+							<div
+								className="w-4 h-4 bg-pink-500 rounded-full animate-bounce"
+								style={{ animationDelay: "0.2s" }}
+							></div>
+						</div>
+						<p className="text-gray-800 font-semibold text-lg">
+							Loading hand tracking...
+						</p>
+					</div>
+				)}
 
-			{/* Canvas for drawing */}
-			<canvas
-				ref={drawRef}
-				width={640}
-				height={480}
-				className="absolute top-0 left-0 rounded-lg"
-				style={{ transform: "scaleX(-1)" }}
-			/>
+				{/* Canvas for bg */}
+				<canvas
+					ref={bgRef}
+					width={640}
+					height={480}
+					className="absolute top-0 left-0 rounded-xl"
+					style={{ transform: "scaleX(-1)" }}
+				/>
 
-			{/* Canvas for overlay */}
-			<canvas
-				ref={overlayRef}
-				width={640}
-				height={480}
-				className="absolute top-0 left-0 rounded-lg pointer-events-none"
-				style={{ transform: "scaleX(-1)" }}
-			/>
+				{/* Canvas for drawing */}
+				<canvas
+					ref={drawRef}
+					width={640}
+					height={480}
+					className="absolute top-0 left-0 rounded-xl"
+					style={{ transform: "scaleX(-1)" }}
+				/>
 
-			{/* Clear canvas button at bottom of stuff */}
-			<div className="mt-4">
-				<button
-					onClick={clearDrawing}
-					className="px-4 py-2 bg-pink-500 hover:bg-pink-600 text-white rounded-xl shadow"
-				>
-					Clear Canvas
-				</button>
+				{/* Canvas for overlay */}
+				<canvas
+					ref={overlayRef}
+					width={640}
+					height={480}
+					className="absolute top-0 left-0 rounded-xl pointer-events-none"
+					style={{ transform: "scaleX(-1)" }}
+				/>
 			</div>
 		</div>
 	);
