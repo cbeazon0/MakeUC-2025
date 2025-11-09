@@ -2,6 +2,8 @@
 
 **Drawn to Chaos** is a fast-paced, competitive, free-for-all digital _Pictionary_-style game where players use their webcams to draw random images, then earn points by guessing others' drawings quickly and correctly
 
+![Logo](https://github.com/cbeazon0/MakeUC-2025/blob/main/frontend/src/assets/logo.png)
+
 ## How Can I Play?
 
 Follow the steps below to clone the repo and get started!
