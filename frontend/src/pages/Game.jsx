@@ -1,13 +1,15 @@
 import { useEffect, useState, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { socket } from "../socket/socket.js";
 import HandCanvas from "../components/HandCanvas.jsx";
 
-const Game = ({ me }) => {
+const Game = ({ me, onLeave }) => {
 	const [phase, setPhase] = useState("loading");
 	const [word, setWord] = useState(null);
 	const [round, setRound] = useState(0);
 	const [timer, setTimer] = useState(0);
 	const [leaderboard, setLeaderboard] = useState([]);
+	const [wordLength, setWordLength] = useState(0);
 
 	// Syncing stuff
 	const [revealEnd, setRevealEnd] = useState(null);
@@ -22,14 +24,27 @@ const Game = ({ me }) => {
 	const [chatInput, setChatInput] = useState("");
 	const [chatMessages, setChatMessages] = useState([]);
 
+	const navigate = useNavigate();
+
 	useEffect(() => {
-		socket.on("gameInit", () => setPhase("loading"));
+		socket.on("gameInit", (data) => {
+			const players = data.players || me?.lobbyPlayers || [];
+			setLeaderboard(players.map((p) => ({ name: p.name, score: 0 })));
+			setPhase("loading");
+		});
+
 		socket.on("roundBegin", (data) => {
 			setRound(data.round);
 			setWord(data.words[socket.id]);
 			setRevealEnd(data.revealEnd);
 			setDrawEnd(data.drawEnd);
 			setPhase("wordReveal");
+			setChatMessages([]);
+			if (data.players) {
+				setLeaderboard(
+					data.players.map((p) => ({ name: p.name, score: p.score || 0 }))
+				);
+			}
 		});
 
 		return () => {
@@ -67,7 +82,7 @@ const Game = ({ me }) => {
 					lobbyName: me.lobbyName,
 					image: imageData,
 				});
-				setPhase("finishedDrawing");
+				setPhase("waitingForGuessing");
 			}
 		}, 250);
 		return () => clearInterval(interval);
@@ -76,28 +91,28 @@ const Game = ({ me }) => {
 	// Guessing phase timer
 	useEffect(() => {
 		if (phase !== "guessing" || !endTime) return;
+
+		// Clear any previous intervals before setting a new one
+		setGuessTimer(Math.max(0, Math.floor((endTime - Date.now()) / 1000)));
+
 		const interval = setInterval(() => {
 			const timeLeft = Math.max(0, Math.floor((endTime - Date.now()) / 1000));
 			setGuessTimer(timeLeft);
-			if (timeLeft <= 0) clearInterval(interval);
-		}, 250);
+			if (timeLeft <= 0) {
+				clearInterval(interval);
+				setPhase("roundEnd");
+			}
+		}, 1000);
+
 		return () => clearInterval(interval);
-	}, [phase, endTime]);
+	}, [endTime]);
 
 	useEffect(() => {
-		socket.on("roundEnd", (data) => {
-			setPhase("roundEnd");
-		});
-
-		return () => socket.off("roundEnd");
-	}, []);
-
-	// Leaderboard stuff
-	useEffect(() => {
-		setLeaderboard([
-			{ name: "Player 1", score: 10 },
-			{ name: "Player 2", score: 5 },
-		]);
+		if (phase !== "roundSummary") return;
+		const interval = setInterval(() => {
+			setTimer((prev) => Math.max(0, prev - 1));
+		}, 1000);
+		return () => clearInterval(interval);
 	}, [phase]);
 
 	useEffect(() => {
@@ -105,14 +120,12 @@ const Game = ({ me }) => {
 			setCurrentImage(data.image);
 			setCurrentDrawer(data.drawer);
 			setEndTime(data.endTime);
+			setWordLength(data.wordLength || 0);
 			setPhase("guessing");
 		});
 
-		socket.on("roundSummary", () => setPhase("roundSummary"));
-
 		return () => {
 			socket.off("showDrawing");
-			socket.off("roundSummary");
 		};
 	}, []);
 
@@ -128,16 +141,46 @@ const Game = ({ me }) => {
 
 	useEffect(() => {
 		socket.on("updatePoints", (data) => {
-			setLeaderboard(data.players || []);
+			if (data?.players?.length) setLeaderboard(data.players);
 		});
 
 		return () => socket.off("updatePoints");
+	}, []);
+
+	useEffect(() => {
+		socket.on("roundSummary", (data) => {
+			setLeaderboard(data.players || []);
+			setTimer(5);
+			setPhase("roundSummary");
+		});
+
+		socket.on("gameOver", () => {
+			setPhase("gameOver");
+		});
+
+		return () => {
+			socket.off("roundSummary");
+			socket.off("gameOver");
+		};
 	}, []);
 
 	if (phase === "loading") {
 		return (
 			<div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
 				<h1 className="text-3xl font-bold animate-pulse">Loading game...</h1>
+			</div>
+		);
+	}
+
+	if (phase === "loadingNext") {
+		return (
+			<div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center">
+				<h1 className="text-2xl font-bold mb-2 animate-pulse">
+					Preparing next stage...
+				</h1>
+				<p className="text-gray-400">
+					Please wait while everyone finishes drawing.
+				</p>
 			</div>
 		);
 	}
@@ -190,7 +233,7 @@ const Game = ({ me }) => {
 		);
 	}
 
-	if (phase === "finishedDrawing") {
+	if (phase === "waitingForGuessing") {
 		return (
 			<div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center">
 				<h1 className="text-2xl font-bold">Time’s up!</h1>
@@ -202,9 +245,11 @@ const Game = ({ me }) => {
 	if (phase === "guessing") {
 		return (
 			<div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center">
-				<h1 className="text-2xl font-bold mb-2">
-					Guess the drawing! (by {currentDrawer})
-				</h1>
+				{currentDrawer !== socket.id && (
+					<p className="text-xl mb-3 text-gray-300">
+						Word: {Array(wordLength).fill("_").join(" ")}
+					</p>
+				)}
 				<p className="text-gray-400 mb-4">Time left: {guessTimer}s</p>
 
 				<div className="bg-gray-800 rounded-lg w-3/4 h-[480px] flex items-center justify-center">
@@ -283,8 +328,71 @@ const Game = ({ me }) => {
 	if (phase === "roundSummary") {
 		return (
 			<div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center">
-				<h1 className="text-2xl font-bold mb-2">All drawings shown!</h1>
-				<p className="text-gray-400">Next round coming soon...</p>
+				<h1 className="text-3xl font-bold mb-2">Round {round} Summary</h1>
+				<h2 className="text-gray-400 mb-4">
+					Next round starting in {timer}s...
+				</h2>
+				<div className="bg-gray-800 rounded p-4 w-64">
+					<h3 className="font-semibold mb-2">Leaderboard</h3>
+					<ul className="space-y-2">
+						{leaderboard.map((p) => (
+							<li
+								key={p.name}
+								className="flex justify-between bg-gray-700 rounded px-3 py-1"
+							>
+								<span>{p.name}</span>
+								<span>{p.score}</span>
+							</li>
+						))}
+					</ul>
+				</div>
+			</div>
+		);
+	}
+
+	if (phase === "gameOver") {
+		return (
+			<div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center">
+				<h1 className="text-3xl font-bold mb-2">Game Over!</h1>
+				<h2 className="text-gray-400 mb-4">Final Leaderboard</h2>
+
+				<div className="bg-gray-800 rounded p-4 w-64 mb-6">
+					<ul className="space-y-2">
+						{leaderboard.map((p) => (
+							<li
+								key={p.name}
+								className="flex justify-between bg-gray-700 rounded px-3 py-1"
+							>
+								<span>{p.name}</span>
+								<span>{p.score}</span>
+							</li>
+						))}
+					</ul>
+				</div>
+
+				<div className="flex space-x-4">
+					{/* Back to Lobby */}
+					<button
+						onClick={() => {
+							socket.emit("getLobbyState", { lobbyName: me.lobbyName });
+							navigate("/lobby");
+						}}
+						className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded"
+					>
+						Back to Lobby
+					</button>
+
+					{/* Leave Lobby */}
+					<button
+						onClick={() => {
+							socket.emit("leaveLobby", { lobbyName: me.lobbyName });
+							onLeave();
+						}}
+						className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded"
+					>
+						Leave Lobby
+					</button>
+				</div>
 			</div>
 		);
 	}

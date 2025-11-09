@@ -40,7 +40,7 @@ const App = () => {
 						me={me}
 						onLeave={() => {
 							setMe(null);
-							navigate("/join");
+							navigate("/");
 						}}
 					/>
 				}
