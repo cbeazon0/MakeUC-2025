@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import {
+	useEffect,
+	useRef,
+	useState,
+	forwardRef,
+	useImperativeHandle,
+} from "react";
 import Webcam from "react-webcam";
 import {
 	HandLandmarker,
@@ -11,7 +17,7 @@ function lerp(a, b, t) {
 	return a + (b - a) * t;
 }
 
-const HandCanvas = () => {
+const HandCanvas = forwardRef((props, ref) => {
 	// Webcam ref
 	const webcamRef = useRef(null);
 
@@ -197,8 +203,8 @@ const HandCanvas = () => {
 								hovered = { type: "drawColor", color: c };
 							}
 						});
-						
-                        // Detect toggle bg hover
+
+						// Detect toggle bg hover
 						if (
 							mirroredX >= toggleArea.current.x &&
 							mirroredX <= toggleArea.current.x + toggleArea.current.w &&
@@ -235,9 +241,9 @@ const HandCanvas = () => {
 								overlayCtx.lineWidth = 4;
 								overlayCtx.stroke();
 
-                                // Activate button action when progress completes (1 sec)
+								// Activate button action when progress completes (1 sec)
 								if (progress >= 1) {
-                                    // Change draw color else toggle bg
+									// Change draw color else toggle bg
 									if (hovered.type === "drawColor") {
 										drawCtx.beginPath();
 										prevPos.current = { x: null, y: null };
@@ -257,7 +263,7 @@ const HandCanvas = () => {
 			rafId = requestAnimationFrame(processFrame);
 		};
 
-        // Start processing loop and cancel on cleanup
+		// Start processing loop and cancel on cleanup
 		rafId = requestAnimationFrame(processFrame);
 		return () => {
 			running = false;
@@ -265,16 +271,24 @@ const HandCanvas = () => {
 		};
 	}, [handLandmarker]);
 
-    // Clear drawing canvas function
+	// Clear drawing canvas function
 	const clearDrawing = () => {
 		const ctx = drawRef.current.getContext("2d");
 		ctx.clearRect(0, 0, 640, 480);
 		prevPos.current = { x: null, y: null };
 	};
 
+	useImperativeHandle(ref, () => ({
+		getImage: () => {
+			const ctx = drawRef.current.getContext("2d");
+			return drawRef.current.toDataURL("image/png");
+		},
+		clearDrawing: () => clearDrawing(),
+	}));
+
 	return (
 		<div className="relative flex flex-col items-center">
-            {/* Webcam component */}
+			{/* Webcam component */}
 			<Webcam
 				ref={webcamRef}
 				mirrored
@@ -283,7 +297,7 @@ const HandCanvas = () => {
 				videoConstraints={{ width: 480, height: 360, facingMode: "user" }}
 			/>
 
-            {/* Canvas for bg */}
+			{/* Canvas for bg */}
 			<canvas
 				ref={bgRef}
 				width={640}
@@ -292,7 +306,7 @@ const HandCanvas = () => {
 				style={{ transform: "scaleX(-1)" }}
 			/>
 
-            {/* Canvas for drawing */}
+			{/* Canvas for drawing */}
 			<canvas
 				ref={drawRef}
 				width={640}
@@ -301,7 +315,7 @@ const HandCanvas = () => {
 				style={{ transform: "scaleX(-1)" }}
 			/>
 
-            {/* Canvas for overlay */}
+			{/* Canvas for overlay */}
 			<canvas
 				ref={overlayRef}
 				width={640}
@@ -310,7 +324,7 @@ const HandCanvas = () => {
 				style={{ transform: "scaleX(-1)" }}
 			/>
 
-            {/* Clear canvas button at bottom of stuff */}
+			{/* Clear canvas button at bottom of stuff */}
 			<div className="mt-4">
 				<button
 					onClick={clearDrawing}
@@ -321,6 +335,6 @@ const HandCanvas = () => {
 			</div>
 		</div>
 	);
-};
+});
 
 export default HandCanvas;

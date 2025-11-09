@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useEffectEvent, useState } from "react";
 import { socket } from "../socket/socket.js";
 import { useNavigate } from "react-router-dom";
 
@@ -32,17 +32,34 @@ const Lobby = ({ me, onLeave }) => {
 	}, [me.lobbyName]);
 
 	useEffect(() => {
-		// Determine if current player is the host
-		if (players.length > 0 && players[0].name === me.name) {
-			setIsHost(true);
-		}
-
-		const onGameStart = (data) => {
+		const onGameStart = () => {
 			navigate("/game");
 		};
 
+		const onGameInit = () => {
+			navigate("/game");
+		};
+
+		const onRoundBegin = () => {
+			navigate("/game");
+		};
+
+		// Listen for game start events
 		socket.on("gameStarted", onGameStart);
-		return () => socket.off("gameStarted", onGameStart);
+		socket.on("gameInit", onGameInit);
+		socket.on("roundBegin", onRoundBegin);
+
+		// Cleanup
+		return () => {
+			socket.off("gameStarted", onGameStart);
+			socket.off("gameInit", onGameInit);
+			socket.off("roundBegin", onRoundBegin);
+		};
+	}, []);
+
+	useEffect(() => {
+		// Determine if current player is host
+		setIsHost(players.length > 0 && players[0].name === me.name);
 	}, [players, me.name]);
 
 	const leaveLobby = () => {

@@ -188,3 +188,54 @@ async def startGame(sid, data):
     await asyncio.sleep(2)
     
     await sio.emit("roundBegin", {"round": 1, "words": games[lobbyName]["words"]}, room = lobbyName)
+    
+# Submit drawing event
+@sio.event
+async def submitDrawing(sid, data):
+    lobbyName = (data or {}).get("lobbyName", "")
+    imageData = (data or {}).get("image", "")
+    
+    if not lobbyName or not imageData:
+        await sio.emit("error", {"message": "Invalid drawing submission."}, to = sid)
+        return
+    
+    game = games.get(lobbyName)
+    if not game:
+        await sio.emit("error", {"message": "Game not found for this lobby."}, to = sid)
+        return
+    
+    # Save player's image
+    if "drawings" not in game:
+        game["drawings"] = {}
+    game["drawings"][sid] = imageData
+    print(f"Received drawing from {sid} ({len(game['drawings'])}/{len(game['points'])})")
+    
+    # If all players have submitted their drawings go to next step
+    if len(game["drawings"]) == len(game["points"]):
+        print(f"All drawings submitted for lobby '{lobbyName}'")
+        await sio.emit("roundEnd", {"round": game["round"], "message": "All drawings recieved"}, room = lobbyName)
+        
+        # Wait 2 seconds, then start showing drawings
+        await asyncio.sleep(2)
+        await showDrawings(lobbyName)
+        
+# Show each drawing for guessing phase
+async def showDrawings(lobbyName):
+    game = games.get(lobbyName)
+    if not game or "drawings" not in game:
+        return
+    
+    print(f"Showing drawings for lobby '{lobbyName}'")
+    
+    # Iterate over each image
+    for sid, image in game["drawings"].items():
+        playerName = next((p["name"] for p in lobbies[lobbyName]["players"] if p["sid"] == sid), "Unknown")
+        
+        await sio.emit("showDrawing", {"drawer": playerName, "image": image}, room = lobbyName)
+        
+        print(f"Showing drawing by {playerName}")
+        await asyncio.sleep(30) # Wait 30 seconds before next drawing
+    
+    # After all drawings shown end round
+    await sio.emit("roundSummary", {"message": "All drawings shown!"}, room = lobbyName)
+    print(f"Completed showing drawings for lobby '{lobbyName}'")
