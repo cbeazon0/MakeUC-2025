@@ -37,7 +37,7 @@ POWERUPICON = "⭐"
 def getLobby(lobbyName):
     # If lobby name not taken -> create new lobby
     if lobbyName not in lobbies:
-        lobbies[lobbyName] = {"max": 2, "players": []}
+        lobbies[lobbyName] = {"max": 6, "players": []}
     return lobbies[lobbyName]
 
 # Push current lobby state to all connected users

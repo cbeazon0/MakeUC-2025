@@ -101,7 +101,7 @@ const Home = ({ onJoined }) => {
 						</div>
 
 						<div className="text-center mt-4 text-gray-500 text-sm">
-							<p>Max 2 players per lobby</p>
+							<p>Max 6 players per lobby!</p>
 						</div>
 					</div>
 				</div>
