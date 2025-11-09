@@ -2,12 +2,21 @@ from fastapi import FastAPI
 from socketio import AsyncServer    # Asycn Socket.IO server
 from socketio.asgi import ASGIApp  # Wrap server as ASGI app
 import random, asyncio, time
+from fastapi.middleware.cors import CORSMiddleware
 
 # FastAPI app
 api = FastAPI(
     title = "Lobby Service",
     version = "1.0.0",
     description = "Service to manage game lobbies for Drawn to Chaos"
+)
+
+api.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # SocketIO server with ASGI and CORS allowed origins
