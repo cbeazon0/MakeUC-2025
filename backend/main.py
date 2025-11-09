@@ -274,25 +274,30 @@ async def submitGuess(sid, data):
         return
     
     game = games.get(lobbyName)
-    if not game or "drawings" not in game:
+    lobby = lobbies.get(lobbyName)
+    if not game or not lobby or "drawings" not in game:
         return
     
-    # Find correct word for current drawing
-    correctWord = None
-    for playerSid, word in game["words"].items():
-        if playerSid in game["drawings"]:
-            correctWord = word.lower()
-            break
+    # Find correct word (current drawer's word)
+    currentDrawerSid = next(iter(game["drawings"].keys()))
+    correctWord = game["words"].get(currentDrawerSid, "").lower()
     
-    # If guessed correctly and not already guessed
-    if correctWord and guess == correctWord:
-        # Points update
+    # Prevent drawer from guessing their own word
+    if sid == currentDrawerSid:
+        await sio.emit("chatMessage", {"from": "System", "text": "You’re the drawer! You can’t guess your own word."}, to = sid)
+        return
+    
+    # Send player's own guess back to them only
+    await sio.emit("chatMessage", {"from": "You", "text": guess},to = sid)
+    
+    # If guess is correct
+    if guess == correctWord:
+        playerName = next((p["name"] for p in lobby["players"] if p["sid"] == sid), "Someone")
         game["points"][sid] = game["points"].get(sid, 0) + 10
         await broadcastPoints(lobbyName)
         
-        # Notify all players of player correct guess
-        playerName = next((p["name"] for p in lobbies[lobbyName]["players"] if p["sid"] == sid), "A player")
-        await sio.emit("chatNotification", {"message": f"{playerName} guessed correctly!"}, room = lobbyName)
+        # Notify only the correct guesser
+        await sio.emit("chatMessage", {"from": "System", "text": f"You guessed it! The word was '{correctWord}'"}, to = sid)
         
-        # Stop guessing phase for this player
-        await sio.emit("correctGuess", {"text": f"You guessed it! The word was '{correctWord}'"}, to = sid)
+        # Notify everyone else
+        await sio.emit("chatMessage", {"from": "System", "text": f"{playerName} guessed the word!"}, skip_sid = sid, room = lobbyName)

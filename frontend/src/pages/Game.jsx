@@ -120,17 +120,9 @@ const Game = ({ me }) => {
 		socket.on("chatMessage", (msg) =>
 			setChatMessages((prev) => [...prev, msg])
 		);
-		socket.on("chatNotification", (msg) =>
-			setChatMessages((prev) => [...prev, { from: "System", text: msg.text }])
-		);
-		socket.on("correctGuess", (msg) =>
-			setChatMessages((prev) => [...prev, { from: "System", text: msg.text }])
-		);
 
 		return () => {
 			socket.off("chatMessage");
-			socket.off("chatNotification");
-			socket.off("correctGuess");
 		};
 	}, []);
 
@@ -227,12 +219,26 @@ const Game = ({ me }) => {
 					)}
 				</div>
 
+				{socket.id === currentDrawer && (
+					<div className="text-sm text-gray-400 mb-2 italic">
+						You are the drawer — waiting for guesses...
+					</div>
+				)}
+
 				{/* Chat UI */}
 				<div className="mt-6 w-3/4 bg-gray-800 rounded-lg p-4">
 					<div className="h-48 overflow-y-auto border-b border-gray-700 mb-3">
 						{chatMessages.map((m, i) => (
 							<div key={i} className="text-sm">
-								<span className="font-semibold text-green-400">{m.from}:</span>{" "}
+								<span
+									className={
+										m.from === "System"
+											? "font-semibold text-green-400"
+											: "font-semibold text-blue-400"
+									}
+								>
+									{m.from}:
+								</span>{" "}
 								<span>{m.text}</span>
 							</div>
 						))}
@@ -240,7 +246,7 @@ const Game = ({ me }) => {
 					<form
 						onSubmit={(e) => {
 							e.preventDefault();
-							if (chatInput.trim()) {
+							if (chatInput.trim() && socket.id !== currentDrawer) {
 								socket.emit("submitGuess", {
 									lobbyName: me.lobbyName,
 									guess: chatInput,
@@ -251,14 +257,20 @@ const Game = ({ me }) => {
 						className="flex space-x-2"
 					>
 						<input
-							className="flex-1 bg-gray-700 rounded px-3 py-1 outline-none"
+							className="flex-1 bg-gray-700 rounded px-3 py-1 outline-none disabled:opacity-50"
 							value={chatInput}
 							onChange={(e) => setChatInput(e.target.value)}
-							placeholder="Type your guess..."
+							placeholder={
+								socket.id === currentDrawer
+									? "You’re the drawer. Waiting for guesses..."
+									: "Type your guess..."
+							}
+							disabled={socket.id === currentDrawer}
 						/>
 						<button
 							type="submit"
-							className="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded"
+							className="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded disabled:opacity-50"
+							disabled={socket.id === currentDrawer}
 						>
 							Send
 						</button>
