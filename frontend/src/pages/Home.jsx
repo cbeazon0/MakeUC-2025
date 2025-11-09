@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { socket } from "../socket/socket.js";
 import Logo from "../assets/logo.png";
+import Video from "../assets/Drawn_to_Chaos_Tutorial.mp4";
 
 const Home = ({ onJoined }) => {
 	const [name, setName] = useState("");
@@ -116,9 +117,12 @@ const Home = ({ onJoined }) => {
 							<video
 								className="w-full h-full object-cover"
 								controls
-								poster="/path-to-thumbnail.jpg"
+								poster="/assets/Drawn_to_Chaos_Tutorial.jpg"
 							>
-								<source src="/path-to-video.mp4" type="video/mp4" />
+								<source
+									src={Video}
+									type="video/mp4"
+								/>
 								Your browser does not support the video tag.
 							</video>
 						</div>
