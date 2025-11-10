@@ -13,7 +13,7 @@ const Lobby = ({ me, onLeave }) => {
 	// When backend broadcasts lobby info
 	useEffect(() => {
 		const onLobbyUpdate = (payload) => setPlayers(payload.players || []);
-		const onFull = () => setMessage("Lobby is full! (Max 2 players)");
+		const onFull = () => setMessage("Lobby is full! (Max 6 players)");
 		const onError = (e) => setMessage(e?.message || "Join error");
 
 		// Do things when socket events happen
@@ -90,9 +90,15 @@ const Lobby = ({ me, onLeave }) => {
 						<h2 className="text-3xl font-bold text-gray-800 mb-2">
 							{me.lobbyName}
 						</h2>
-						<p className="text-gray-500 text-sm animate-pulse">
-							Waiting for players...
-						</p>
+						{players.length < 6 ? (
+							<p className="text-gray-500 text-sm animate-pulse">
+								Waiting for players...
+							</p>
+						) : (
+							<p className="text-gray-500 text-sm animate-pulse">
+								Waiting for host to start game...
+							</p>
+						)}
 						{message && (
 							<p className="text-orange-500 text-sm mt-2 font-semibold">
 								{message}
@@ -107,7 +113,7 @@ const Lobby = ({ me, onLeave }) => {
 						<div className="flex items-center justify-between mb-3">
 							<h3 className="font-bold text-gray-700 text-lg">Players</h3>
 							<span className="text-sm font-semibold text-gray-500">
-								{players.length}/2
+								{players.length}/6
 							</span>
 						</div>
 						<div className="space-y-3">
@@ -124,7 +130,7 @@ const Lobby = ({ me, onLeave }) => {
 									)}
 								</div>
 							))}
-							{players.length < 2 && (
+							{players.length < 6 && (
 								<div className="bg-gray-100 rounded-lg px-4 py-3 border-2 border-dashed border-gray-300 text-center text-gray-400">
 									Waiting for player...
 								</div>
